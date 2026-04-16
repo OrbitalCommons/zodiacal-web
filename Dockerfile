@@ -14,6 +14,9 @@ RUN apt-get update && \
 # Copy pre-built backend binary (frontend assets are embedded via rust-embed)
 COPY build-output/backend /app/backend
 
+# Create indexes directory (mount .zdcl files here at runtime)
+RUN mkdir -p /app/indexes
+
 # Create non-root user
 RUN useradd -m -u 1001 -s /bin/bash appuser && \
     chown -R appuser:appuser /app
@@ -24,6 +27,9 @@ EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:3000/api/health || exit 1
+
+# INDEX_DIR defaults to /app/indexes — bind-mount .zdcl files there
+ENV INDEX_DIR=/app/indexes
 
 # All configuration via environment variables at runtime
 CMD ["/app/backend"]

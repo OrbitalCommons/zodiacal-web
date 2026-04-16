@@ -27,6 +27,20 @@ pub struct NewJob {
     pub original_filename: Option<String>,
 }
 
+#[derive(Debug, AsChangeset)]
+#[diesel(table_name = jobs)]
+pub struct UpdateJob {
+    pub status: Option<String>,
+    pub ra_deg: Option<f64>,
+    pub dec_deg: Option<f64>,
+    pub orientation_deg: Option<f64>,
+    pub pixel_scale_arcsec: Option<f64>,
+    pub field_width_deg: Option<f64>,
+    pub field_height_deg: Option<f64>,
+    pub error_message: Option<String>,
+    pub updated_at: Option<chrono::NaiveDateTime>,
+}
+
 impl From<Job> for shared::Job {
     fn from(job: Job) -> Self {
         let status = match job.status.as_str() {

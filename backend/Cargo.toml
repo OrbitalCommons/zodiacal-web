@@ -34,6 +34,14 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # WebSocket (typed via ws-bridge)
 ws-bridge = { version = "0.1", features = ["server"] }
 
+# Plate solving
+zodiacal = { version = "0.2.0", features = ["image-processing"] }
+ndarray = "0.17"
+
+# Image decoding
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "tiff"] }
+fitsio-pure = "0.11"
+
 # Utilities
 anyhow = "1"
 uuid = { version = "1", features = ["v4", "serde"] }
