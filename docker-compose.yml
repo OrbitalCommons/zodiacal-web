@@ -26,10 +26,13 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    volumes:
+      - ${INDEX_DIR:-./indexes}:/app/indexes:ro
     environment:
       DATABASE_URL: "postgresql://zodiacal:dev_password@db:5432/zodiacal"
       HOST: "0.0.0.0"
       PORT: "3000"
+      INDEX_DIR: "/app/indexes"
       SESSION_SECRET: "${SESSION_SECRET:-dev-secret-change-in-production-please-at-least-64-bytes}"
     restart: unless-stopped
     healthcheck:

@@ -1,16 +1,21 @@
 mod db;
+mod decode;
 mod embedded_assets;
 mod handlers;
 mod models;
 mod schema;
 
 use crate::db::DbPool;
-use axum::{routing::get, Router};
+use axum::{
+    routing::{get, post},
+    Router,
+};
 use clap::Parser;
-use std::{env, sync::Arc};
+use std::{collections::HashMap, env, path::PathBuf, sync::Arc};
 use tower_http::cors::{Any, CorsLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use ws_bridge::WsEndpoint;
+use zodiacal::index::Index;
 
 #[derive(Parser, Debug, Clone)]
 #[command(name = "zodiacal-web")]
@@ -25,6 +30,8 @@ struct Args {
 pub struct AppState {
     pub dev_mode: bool,
     pub db_pool: DbPool,
+    pub indexes: Arc<Vec<Index>>,
+    pub pending_uploads: Arc<std::sync::Mutex<HashMap<uuid::Uuid, Vec<u8>>>>,
 }
 
 #[tokio::main]
@@ -67,9 +74,20 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
+    // Load plate-solving indexes
+    let index_dir = env::var("INDEX_DIR").unwrap_or_else(|_| "indexes".to_string());
+    let indexes = load_indexes(&PathBuf::from(&index_dir))?;
+    tracing::info!(
+        "Loaded {} plate-solving index(es) from {}",
+        indexes.len(),
+        index_dir
+    );
+
     let app_state = Arc::new(AppState {
         dev_mode: args.dev_mode,
         db_pool: pool,
+        indexes: Arc::new(indexes),
+        pending_uploads: Arc::new(std::sync::Mutex::new(HashMap::new())),
     });
 
     // CORS
@@ -81,6 +99,8 @@ async fn main() -> anyhow::Result<()> {
     // Router
     let app = Router::new()
         .route("/api/health", get(handlers::health::health))
+        .route("/api/upload", post(handlers::upload::upload))
+        .route("/ws/solve/:job_id", get(handlers::solve_ws::handler))
         .with_state(app_state)
         .route(shared::AppSocket::PATH, handlers::websocket::handler())
         .fallback(axum::routing::get(embedded_assets::serve_embedded_frontend))
@@ -99,6 +119,34 @@ async fn main() -> anyhow::Result<()> {
         .await?;
 
     Ok(())
+}
+
+/// Load all .zdcl index files from a directory.
+fn load_indexes(dir: &std::path::Path) -> anyhow::Result<Vec<Index>> {
+    let mut indexes = Vec::new();
+
+    if !dir.exists() {
+        tracing::warn!("Index directory does not exist: {}", dir.display());
+        return Ok(indexes);
+    }
+
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().is_some_and(|ext| ext == "zdcl") {
+            match Index::load(&path) {
+                Ok(idx) => {
+                    tracing::info!("Loaded index: {}", path.display());
+                    indexes.push(idx);
+                }
+                Err(e) => {
+                    tracing::error!("Failed to load index {}: {}", path.display(), e);
+                }
+            }
+        }
+    }
+
+    Ok(indexes)
 }
 
 async fn shutdown_signal() {

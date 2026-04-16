@@ -1,8 +1,11 @@
 use gloo_net::http::Request;
 use gloo_timers::future::sleep;
-use shared::{AppSocket, ClientMsg, HealthResponse, ServerMsg};
+use shared::{
+    AppSocket, ClientMsg, HealthResponse, ServerMsg, SolveServerMsg, SolveSocket, SubmitJobResponse,
+};
 use std::time::Duration;
 use wasm_bindgen_futures::spawn_local;
+use web_sys::{Event, HtmlInputElement};
 use yew::prelude::*;
 use yew_router::prelude::*;
 
@@ -34,8 +37,10 @@ pub fn app() -> Html {
 #[function_component(Home)]
 fn home() -> Html {
     let health = use_state(|| None::<String>);
-    let ws_status = use_state(|| "Connecting...".to_string());
-    let ws_messages = use_state(Vec::<String>::new);
+    let ws_status = use_state(|| "Connected".to_string());
+    let solve_status = use_state(|| None::<String>);
+    let activity = use_state(Vec::<String>::new);
+    let file_input_ref = use_node_ref();
 
     // Health check via HTTP
     {
@@ -54,17 +59,13 @@ fn home() -> Html {
         });
     }
 
-    // WebSocket connection via ws-bridge
+    // Background AppSocket heartbeat
     {
         let ws_status = ws_status.clone();
-        let ws_messages = ws_messages.clone();
         use_effect_with((), move |_| {
             match ws_bridge::yew_client::connect::<AppSocket>() {
                 Ok(conn) => {
-                    ws_status.set("Connected".to_string());
                     let (mut tx, mut rx) = conn.split();
-
-                    // Ping loop — sends a Ping every 5 seconds
                     spawn_local(async move {
                         loop {
                             sleep(Duration::from_secs(5)).await;
@@ -73,61 +74,17 @@ fn home() -> Html {
                             }
                         }
                     });
-
-                    // Receive loop — updates UI state on each message
-                    let msgs = ws_messages;
-                    let status = ws_status;
                     spawn_local(async move {
                         while let Some(result) = rx.recv().await {
                             match result {
-                                Ok(ServerMsg::Heartbeat) => {
-                                    let mut current = (*msgs).clone();
-                                    current.push("Received: Heartbeat".to_string());
-                                    if current.len() > 10 {
-                                        current.drain(..current.len() - 10);
-                                    }
-                                    msgs.set(current);
-                                }
-                                Ok(ServerMsg::Error { message }) => {
-                                    let mut current = (*msgs).clone();
-                                    current.push(format!("Error: {}", message));
-                                    msgs.set(current);
-                                }
-                                Ok(ServerMsg::JobAccepted { job_id }) => {
-                                    let mut current = (*msgs).clone();
-                                    current.push(format!("Job accepted: {}", job_id));
-                                    msgs.set(current);
-                                }
-                                Ok(ServerMsg::JobProgress {
-                                    job_id,
-                                    status: job_status,
-                                }) => {
-                                    let mut current = (*msgs).clone();
-                                    current.push(format!("Job {}: {:?}", job_id, job_status));
-                                    msgs.set(current);
-                                }
-                                Ok(ServerMsg::JobCompleted { job_id, result }) => {
-                                    let mut current = (*msgs).clone();
-                                    current.push(format!(
-                                        "Job {} solved: RA={:.4} Dec={:.4}",
-                                        job_id, result.ra_deg, result.dec_deg
-                                    ));
-                                    msgs.set(current);
-                                }
-                                Ok(ServerMsg::ServerShutdown { reason, .. }) => {
-                                    status.set(format!("Server shutting down: {}", reason));
-                                    break;
-                                }
-                                Err(e) => {
-                                    status.set(format!("WebSocket error: {}", e));
-                                    break;
-                                }
+                                Ok(ServerMsg::ServerShutdown { .. }) | Err(_) => break,
+                                _ => {}
                             }
                         }
                     });
                 }
                 Err(e) => {
-                    ws_status.set(format!("Connect failed: {}", e));
+                    ws_status.set(format!("WS failed: {}", e));
                 }
             }
         });
@@ -145,21 +102,187 @@ fn home() -> Html {
                 }}
             </div>
 
-            <div class="upload-area">
+            <div class="upload-area" onclick={
+                let file_input_ref = file_input_ref.clone();
+                Callback::from(move |_: MouseEvent| {
+                    if let Some(input) = file_input_ref.cast::<HtmlInputElement>() {
+                        input.click();
+                    }
+                })
+            }>
                 <p>{ "Drag & drop an image here, or click to upload" }</p>
                 <p style="color: #666; font-size: 0.9em;">
                     { "Supports FITS, JPEG, PNG, TIFF" }
                 </p>
+                { if let Some(status) = (*solve_status).as_ref() {
+                    html! { <p style="color: #7eb8da; margin-top: 0.5rem;">{ status }</p> }
+                } else {
+                    html! {}
+                }}
             </div>
+            <input
+                ref={file_input_ref.clone()}
+                type="file"
+                accept=".fits,.fit,.fts,.jpeg,.jpg,.png,.tiff,.tif"
+                style="display: none;"
+                onchange={
+                    let solve_status = solve_status.clone();
+                    let activity = activity.clone();
+                    Callback::from(move |e: Event| {
+                        let input: HtmlInputElement = e.target_unchecked_into();
+                        let Some(files) = input.files() else { return };
+                        let Some(file) = files.get(0) else { return };
+                        let filename = file.name();
+                        let solve_status = solve_status.clone();
+                        let activity = activity.clone();
+                        solve_status.set(Some(format!("Uploading {}...", filename)));
+                        spawn_local(async move {
+                            // Read file bytes
+                            let Ok(buf) = wasm_bindgen_futures::JsFuture::from(
+                                file.array_buffer(),
+                            )
+                            .await
+                            else {
+                                solve_status.set(Some("Failed to read file".to_string()));
+                                return;
+                            };
+                            let uint8 = js_sys::Uint8Array::new(&buf);
+
+                            // Upload via HTTP POST
+                            let form = web_sys::FormData::new().unwrap();
+                            let blob = web_sys::Blob::new_with_u8_array_sequence(
+                                &js_sys::Array::of1(&uint8.into()),
+                            )
+                            .unwrap();
+                            let _ =
+                                form.append_with_blob_and_filename("file", &blob, &filename);
+
+                            let resp = match gloo_net::http::Request::post("/api/upload")
+                                .body(form)
+                                .unwrap()
+                                .send()
+                                .await
+                            {
+                                Ok(r) => r,
+                                Err(e) => {
+                                    solve_status
+                                        .set(Some(format!("Upload failed: {}", e)));
+                                    return;
+                                }
+                            };
+
+                            let data = match resp.json::<SubmitJobResponse>().await {
+                                Ok(d) => d,
+                                Err(_) => {
+                                    solve_status
+                                        .set(Some("Upload failed: bad response".to_string()));
+                                    return;
+                                }
+                            };
+
+                            let job_id = data.job_id;
+                            let job_short = &job_id.to_string()[..8];
+                            solve_status.set(Some(format!(
+                                "Job {} — connecting...",
+                                job_short
+                            )));
+
+                            // Open solve WebSocket for progress
+                            let ws_url =
+                                format!("/ws/solve/{}", job_id);
+                            let conn =
+                                match ws_bridge::yew_client::connect_to::<SolveSocket>(
+                                    &ws_url,
+                                ) {
+                                    Ok(c) => c,
+                                    Err(e) => {
+                                        solve_status.set(Some(format!(
+                                            "WS connect failed: {}",
+                                            e
+                                        )));
+                                        return;
+                                    }
+                                };
+
+                            let (_tx, mut rx) = conn.split();
+
+                            // Listen for progress
+                            while let Some(result) = rx.recv().await {
+                                match result {
+                                    Ok(SolveServerMsg::Accepted { .. }) => {
+                                        solve_status.set(Some(format!(
+                                            "Job {} — accepted",
+                                            job_short
+                                        )));
+                                    }
+                                    Ok(SolveServerMsg::Extracting { n_sources }) => {
+                                        let msg = match n_sources {
+                                            Some(n) if n > 0 => format!(
+                                                "Job {} — {} sources extracted",
+                                                job_short, n
+                                            ),
+                                            _ => format!(
+                                                "Job {} — extracting sources...",
+                                                job_short
+                                            ),
+                                        };
+                                        solve_status.set(Some(msg));
+                                    }
+                                    Ok(SolveServerMsg::Solving { n_verified }) => {
+                                        solve_status.set(Some(format!(
+                                            "Job {} — solving ({} verified)...",
+                                            job_short, n_verified
+                                        )));
+                                    }
+                                    Ok(SolveServerMsg::Solved { result }) => {
+                                        let msg = format!(
+                                            "Solved! RA={:.4} Dec={:.4} Scale={:.2}\"/px",
+                                            result.ra_deg,
+                                            result.dec_deg,
+                                            result.pixel_scale_arcsec,
+                                        );
+                                        solve_status.set(Some(msg.clone()));
+                                        let mut current = (*activity).clone();
+                                        current.push(format!(
+                                            "{}: {}",
+                                            filename, msg
+                                        ));
+                                        activity.set(current);
+                                        break;
+                                    }
+                                    Ok(SolveServerMsg::Failed { reason }) => {
+                                        let msg = format!("Failed: {}", reason);
+                                        solve_status.set(Some(msg.clone()));
+                                        let mut current = (*activity).clone();
+                                        current.push(format!(
+                                            "{}: {}",
+                                            filename, msg
+                                        ));
+                                        activity.set(current);
+                                        break;
+                                    }
+                                    Err(e) => {
+                                        solve_status.set(Some(format!(
+                                            "WS error: {}",
+                                            e
+                                        )));
+                                        break;
+                                    }
+                                }
+                            }
+                        });
+                    })
+                }
+            />
 
             <div class="status" style="margin-left: 1rem;">
-                { format!("WebSocket: {}", *ws_status) }
+                { &*ws_status }
             </div>
 
             <div class="job-list">
-                <h3>{ "Activity" }</h3>
+                <h3>{ "Results" }</h3>
                 <ul>
-                    { for (*ws_messages).iter().map(|m| html! { <li>{ m }</li> }) }
+                    { for (*activity).iter().map(|m| html! { <li>{ m }</li> }) }
                 </ul>
             </div>
         </div>

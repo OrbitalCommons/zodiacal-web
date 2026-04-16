@@ -53,6 +53,51 @@ pub enum ClientMsg {
 }
 
 // ---------------------------------------------------------------------------
+// Per-job solve WebSocket — streams progress during a plate solve
+// ---------------------------------------------------------------------------
+
+/// WebSocket endpoint for streaming solve progress on a specific job.
+///
+/// The actual route is `/ws/solve/:job_id` (the path param is handled by axum).
+/// The client connects after uploading via HTTP, and receives progress updates
+/// until the solve completes or fails.
+pub struct SolveSocket;
+
+impl WsEndpoint for SolveSocket {
+    const PATH: &'static str = "/ws/solve";
+    type ServerMsg = SolveServerMsg;
+    type ClientMsg = SolveClientMsg;
+}
+
+/// Server-to-client messages on a solve WebSocket.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum SolveServerMsg {
+    /// Connection accepted, solve is starting
+    Accepted { job_id: Uuid },
+
+    /// Extracting star sources from the image
+    Extracting { n_sources: Option<usize> },
+
+    /// Solver is running; periodic progress update
+    Solving { n_verified: usize },
+
+    /// Solve succeeded
+    Solved { result: SolveResult },
+
+    /// Solve failed
+    Failed { reason: String },
+}
+
+/// Client-to-server messages on a solve WebSocket.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum SolveClientMsg {
+    /// Request to cancel the solve (best-effort)
+    Cancel,
+}
+
+// ---------------------------------------------------------------------------
 // Domain types
 // ---------------------------------------------------------------------------
 
@@ -221,6 +266,69 @@ mod tests {
             ClientMsg::SubscribeJob { job_id } => assert_eq!(job_id, id),
             _ => panic!("Wrong variant"),
         }
+    }
+
+    #[test]
+    fn solve_server_msg_accepted_roundtrip() {
+        let id = Uuid::new_v4();
+        let msg = SolveServerMsg::Accepted { job_id: id };
+        let json = serde_json::to_string(&msg).unwrap();
+        let parsed: SolveServerMsg = serde_json::from_str(&json).unwrap();
+        match parsed {
+            SolveServerMsg::Accepted { job_id } => assert_eq!(job_id, id),
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    #[test]
+    fn solve_server_msg_solving_roundtrip() {
+        let msg = SolveServerMsg::Solving { n_verified: 42 };
+        let json = serde_json::to_string(&msg).unwrap();
+        let parsed: SolveServerMsg = serde_json::from_str(&json).unwrap();
+        match parsed {
+            SolveServerMsg::Solving { n_verified } => assert_eq!(n_verified, 42),
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    #[test]
+    fn solve_server_msg_solved_roundtrip() {
+        let result = SolveResult {
+            ra_deg: 180.0,
+            dec_deg: -45.0,
+            orientation_deg: 10.0,
+            pixel_scale_arcsec: 1.5,
+            field_width_deg: 2.0,
+            field_height_deg: 1.5,
+        };
+        let msg = SolveServerMsg::Solved { result };
+        let json = serde_json::to_string(&msg).unwrap();
+        let parsed: SolveServerMsg = serde_json::from_str(&json).unwrap();
+        match parsed {
+            SolveServerMsg::Solved { result: r } => assert_eq!(r.ra_deg, 180.0),
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    #[test]
+    fn solve_server_msg_failed_roundtrip() {
+        let msg = SolveServerMsg::Failed {
+            reason: "timed out".to_string(),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        let parsed: SolveServerMsg = serde_json::from_str(&json).unwrap();
+        match parsed {
+            SolveServerMsg::Failed { reason } => assert_eq!(reason, "timed out"),
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    #[test]
+    fn solve_client_msg_cancel_roundtrip() {
+        let msg = SolveClientMsg::Cancel;
+        let json = serde_json::to_string(&msg).unwrap();
+        let parsed: SolveClientMsg = serde_json::from_str(&json).unwrap();
+        assert!(matches!(parsed, SolveClientMsg::Cancel));
     }
 
     #[test]
