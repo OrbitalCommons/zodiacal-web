@@ -1,0 +1,55 @@
+body {
+    font-family: sans-serif;
+    margin: 0;
+    padding: 2rem;
+    background: #0a0a1a;
+    color: #eee;
+}
+
+h1 {
+    color: #7eb8da;
+}
+
+.status {
+    padding: 0.5rem 1rem;
+    background: #16213e;
+    border-radius: 4px;
+    display: inline-block;
+    margin-top: 1rem;
+}
+
+.upload-area {
+    margin-top: 2rem;
+    padding: 2rem;
+    border: 2px dashed #334;
+    border-radius: 8px;
+    text-align: center;
+    cursor: pointer;
+}
+
+.upload-area:hover {
+    border-color: #7eb8da;
+    background: #111122;
+}
+
+.job-list {
+    margin-top: 2rem;
+}
+
+.job-card {
+    background: #16213e;
+    border-radius: 6px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+}
+
+.job-card .filename {
+    font-weight: bold;
+    color: #7eb8da;
+}
+
+.job-card .coords {
+    font-family: monospace;
+    margin-top: 0.5rem;
+    color: #aaa;
+}
