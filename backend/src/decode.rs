@@ -24,14 +24,19 @@ fn is_fits(bytes: &[u8]) -> bool {
 }
 
 /// Decode a FITS file from bytes using fitsio-pure.
+///
+/// Scans all HDUs for the first one with a 2D+ image (handles files where
+/// the primary HDU is empty and the image is in an extension).
 fn decode_fits(bytes: &[u8]) -> Result<Array2<f32>> {
     let fits = parse_fits(bytes).context("Failed to parse FITS")?;
-    let hdu = fits.primary();
+
+    // Find the first HDU with at least 2 dimensions
+    let hdu = fits
+        .iter()
+        .find(|h| image_dimensions(h).map_or(false, |d| d.len() >= 2))
+        .context("No 2D image HDU found in FITS file")?;
 
     let dims = image_dimensions(hdu).context("Failed to read FITS dimensions")?;
-    if dims.len() < 2 {
-        bail!("FITS image must be at least 2D, got {}D", dims.len());
-    }
 
     // FITS NAXIS ordering: NAXIS1=width, NAXIS2=height (column-major convention),
     // but fitsio-pure returns data in row-major order matching the byte stream.

@@ -104,6 +104,7 @@ async fn main() -> anyhow::Result<()> {
         .with_state(app_state)
         .route(shared::AppSocket::PATH, handlers::websocket::handler())
         .fallback(axum::routing::get(embedded_assets::serve_embedded_frontend))
+        .layer(axum::extract::DefaultBodyLimit::max(512 * 1024 * 1024)) // 512 MB
         .layer(cors);
 
     // Bind and serve

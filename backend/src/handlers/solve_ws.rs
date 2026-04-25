@@ -83,7 +83,7 @@ async fn run_solve_streaming(
         );
 
         // Report source count (send will fail if receiver dropped — that's fine)
-        let _ = progress_tx.blocking_send(0);
+        let _ = progress_tx.blocking_send(sources.len());
 
         let index_refs: Vec<&zodiacal::index::Index> = indexes.iter().collect();
         let solver_config = zodiacal::solver::SolverConfig {
