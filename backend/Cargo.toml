@@ -36,6 +36,7 @@ ws-bridge = { version = "0.1", features = ["server"] }
 
 # Plate solving
 zodiacal = { version = "0.2.0", features = ["image-processing"] }
+starfield = "0.9"
 ndarray = "0.17"
 
 # Image decoding

@@ -99,6 +99,12 @@ fn home() -> Html {
     let upload_pct = use_state(|| None::<f64>);
     let activity = use_state(Vec::<String>::new);
     let file_input_ref = use_node_ref();
+    // Optional hint inputs (text fields, parsed at submit). Empty string => omitted.
+    let scale_min_ref = use_node_ref();
+    let scale_max_ref = use_node_ref();
+    let ra_hint_ref = use_node_ref();
+    let dec_hint_ref = use_node_ref();
+    let radius_hint_ref = use_node_ref();
 
     // Health check via HTTP
     {
@@ -198,6 +204,33 @@ fn home() -> Html {
                     html! {}
                 }}
             </div>
+            <details class="hints" style="margin-top: 1rem;">
+                <summary style="cursor: pointer; color: #aaa;">
+                    { "Optional hints (speeds up solving)" }
+                </summary>
+                <div class="hints-grid">
+                    <label>
+                        { "Scale min (\"/px)" }
+                        <input ref={scale_min_ref.clone()} type="number" step="any" placeholder="e.g. 0.10" />
+                    </label>
+                    <label>
+                        { "Scale max (\"/px)" }
+                        <input ref={scale_max_ref.clone()} type="number" step="any" placeholder="e.g. 0.20" />
+                    </label>
+                    <label>
+                        { "RA hint (deg)" }
+                        <input ref={ra_hint_ref.clone()} type="number" step="any" placeholder="0–360" />
+                    </label>
+                    <label>
+                        { "Dec hint (deg)" }
+                        <input ref={dec_hint_ref.clone()} type="number" step="any" placeholder="-90 to 90" />
+                    </label>
+                    <label>
+                        { "Search radius (deg)" }
+                        <input ref={radius_hint_ref.clone()} type="number" step="any" placeholder="e.g. 5" />
+                    </label>
+                </div>
+            </details>
             <input
                 ref={file_input_ref.clone()}
                 type="file"
@@ -207,20 +240,47 @@ fn home() -> Html {
                     let solve_status = solve_status.clone();
                     let upload_pct = upload_pct.clone();
                     let activity = activity.clone();
+                    let scale_min_ref = scale_min_ref.clone();
+                    let scale_max_ref = scale_max_ref.clone();
+                    let ra_hint_ref = ra_hint_ref.clone();
+                    let dec_hint_ref = dec_hint_ref.clone();
+                    let radius_hint_ref = radius_hint_ref.clone();
                     Callback::from(move |e: Event| {
                         let input: HtmlInputElement = e.target_unchecked_into();
                         let Some(files) = input.files() else { return };
                         let Some(file) = files.get(0) else { return };
                         let filename = file.name();
+                        // Read hint inputs synchronously before moving into async
+                        let read_hint = |r: &NodeRef| -> Option<String> {
+                            r.cast::<HtmlInputElement>().and_then(|el| {
+                                let v = el.value();
+                                let trimmed = v.trim();
+                                if trimmed.is_empty() {
+                                    None
+                                } else {
+                                    Some(trimmed.to_string())
+                                }
+                            })
+                        };
+                        let scale_min = read_hint(&scale_min_ref);
+                        let scale_max = read_hint(&scale_max_ref);
+                        let ra_hint = read_hint(&ra_hint_ref);
+                        let dec_hint = read_hint(&dec_hint_ref);
+                        let radius_hint = read_hint(&radius_hint_ref);
                         let solve_status = solve_status.clone();
                         let upload_pct = upload_pct.clone();
                         let activity = activity.clone();
                         solve_status.set(Some(format!("Uploading {}...", filename)));
                         upload_pct.set(Some(0.0));
                         spawn_local(async move {
-                            // Build FormData with the file directly
+                            // Build FormData with the file + optional hint fields
                             let form = web_sys::FormData::new().unwrap();
                             let _ = form.append_with_blob_and_filename("file", &file, &filename);
+                            if let Some(v) = scale_min { let _ = form.append_with_str("scale_min_arcsec", &v); }
+                            if let Some(v) = scale_max { let _ = form.append_with_str("scale_max_arcsec", &v); }
+                            if let Some(v) = ra_hint { let _ = form.append_with_str("ra_hint_deg", &v); }
+                            if let Some(v) = dec_hint { let _ = form.append_with_str("dec_hint_deg", &v); }
+                            if let Some(v) = radius_hint { let _ = form.append_with_str("radius_hint_deg", &v); }
 
                             // Upload with progress
                             let pct_state = upload_pct.clone();

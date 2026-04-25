@@ -115,6 +115,24 @@ pub enum JobStatus {
     Failed,
 }
 
+/// Optional hints supplied with an upload to constrain the solver search.
+///
+/// All fields are independent and optional. When provided:
+/// - `scale_min_arcsec` / `scale_max_arcsec` restrict candidate WCS solutions
+///   whose pixel scale falls outside `[min, max]` (arcseconds per pixel).
+///   Both must be set together to take effect.
+/// - `ra_hint_deg` + `dec_hint_deg` + `radius_hint_deg` restrict accepted
+///   solutions to a circular sky region centered on (RA, Dec). All three
+///   must be set together to take effect.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct SolveHints {
+    pub scale_min_arcsec: Option<f64>,
+    pub scale_max_arcsec: Option<f64>,
+    pub ra_hint_deg: Option<f64>,
+    pub dec_hint_deg: Option<f64>,
+    pub radius_hint_deg: Option<f64>,
+}
+
 /// Result of a successful plate solve.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SolveResult {
@@ -337,6 +355,43 @@ mod tests {
         let json = serde_json::to_string(&status).unwrap();
         let parsed: JobStatus = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, JobStatus::Solving);
+    }
+
+    #[test]
+    fn solve_hints_default_is_all_none() {
+        let hints = SolveHints::default();
+        assert_eq!(hints.scale_min_arcsec, None);
+        assert_eq!(hints.scale_max_arcsec, None);
+        assert_eq!(hints.ra_hint_deg, None);
+        assert_eq!(hints.dec_hint_deg, None);
+        assert_eq!(hints.radius_hint_deg, None);
+    }
+
+    #[test]
+    fn solve_hints_roundtrip() {
+        let hints = SolveHints {
+            scale_min_arcsec: Some(0.1),
+            scale_max_arcsec: Some(0.2),
+            ra_hint_deg: Some(213.5),
+            dec_hint_deg: Some(-55.8),
+            radius_hint_deg: Some(1.0),
+        };
+        let json = serde_json::to_string(&hints).unwrap();
+        let parsed: SolveHints = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, hints);
+    }
+
+    #[test]
+    fn solve_hints_partial_roundtrip() {
+        let hints = SolveHints {
+            scale_min_arcsec: Some(0.1),
+            scale_max_arcsec: Some(0.2),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&hints).unwrap();
+        let parsed: SolveHints = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.scale_min_arcsec, Some(0.1));
+        assert_eq!(parsed.ra_hint_deg, None);
     }
 
     #[test]
