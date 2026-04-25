@@ -147,7 +147,13 @@ async fn run_solve_streaming(
             let dec_deg = dec_rad.to_degrees();
             let pixel_scale_deg = sol.wcs.pixel_scale();
             let pixel_scale_arcsec = pixel_scale_deg * 3600.0;
-            let orientation_deg = sol.wcs.cd[0][1].atan2(sol.wcs.cd[0][0]).to_degrees();
+            // Roll about boresight matching focalplane convention
+            // (body +X→+Y about +Z, right-hand rule). zodiacal's TanWcs CD
+            // matrix maps pixel offsets to FITS-convention IWC where +x = west
+            // (RA-decreasing); using cd[1][0] (the dDec/dx component) over
+            // cd[0][0] gives the camera roll directly, with sign matching the
+            // trajectory's `roll_deg`.
+            let orientation_deg = sol.wcs.cd[1][0].atan2(sol.wcs.cd[0][0]).to_degrees();
             let field_width_deg = pixel_scale_deg * width as f64;
             let field_height_deg = pixel_scale_deg * height as f64;
 
