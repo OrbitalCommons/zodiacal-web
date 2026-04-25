@@ -163,6 +163,8 @@ async fn run_solve_streaming(
                 pixel_scale_arcsec,
                 field_width_deg,
                 field_height_deg,
+                n_matched: Some(sol.verify_result.n_matched),
+                log_odds: Some(sol.verify_result.log_odds),
             };
 
             // Update DB
