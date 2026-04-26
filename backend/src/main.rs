@@ -28,8 +28,7 @@ struct Args {
 
 /// In-memory map of jobs awaiting their solve WebSocket connection.
 /// Keyed by job_id, value is (image bytes, optional solver hints).
-pub type PendingUploads =
-    Arc<std::sync::Mutex<HashMap<uuid::Uuid, (Vec<u8>, shared::SolveHints)>>>;
+pub type PendingUploads = Arc<std::sync::Mutex<HashMap<uuid::Uuid, (Vec<u8>, shared::SolveHints)>>>;
 
 #[derive(Clone)]
 pub struct AppState {
