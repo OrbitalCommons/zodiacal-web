@@ -6,11 +6,18 @@ edition = "2021"
 [dependencies]
 yew = { version = "0.21", features = ["csr"] }
 yew-router = "0.18"
+js-sys = "0.3"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
-web-sys = "0.3"
+wasm-bindgen-test = "0.3"
+web-sys = { version = "0.3", features = [
+    "FormData", "Blob", "File", "FileList",
+    "XmlHttpRequest", "XmlHttpRequestUpload", "XmlHttpRequestEventTarget",
+    "ProgressEvent",
+] }
 gloo-net = "0.6"
 gloo-timers = "0.3"
+futures-channel = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ws-bridge = { version = "0.1", features = ["yew-client"] }

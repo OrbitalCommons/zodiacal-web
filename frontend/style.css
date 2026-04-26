@@ -32,6 +32,63 @@ h1 {
     background: #111122;
 }
 
+.progress-bar-bg {
+    margin-top: 1rem;
+    background: #111;
+    border-radius: 4px;
+    height: 24px;
+    width: 100%;
+    overflow: hidden;
+}
+
+.progress-bar-fill {
+    background: #7eb8da;
+    height: 100%;
+    border-radius: 4px;
+    color: #0a0a1a;
+    font-size: 0.8em;
+    font-weight: bold;
+    line-height: 24px;
+    text-align: right;
+    padding-right: 0.5rem;
+    box-sizing: border-box;
+    transition: width 0.2s ease;
+    min-width: 3em;
+    white-space: nowrap;
+}
+
+.hints summary {
+    padding: 0.25rem 0;
+    user-select: none;
+}
+
+.hints-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 0.5rem 1rem;
+    margin-top: 0.5rem;
+    padding: 0.75rem;
+    background: #16213e;
+    border-radius: 4px;
+}
+
+.hints-grid label {
+    display: flex;
+    flex-direction: column;
+    font-size: 0.85em;
+    color: #aaa;
+}
+
+.hints-grid input {
+    margin-top: 0.25rem;
+    padding: 0.35rem 0.5rem;
+    background: #0a0a1a;
+    border: 1px solid #334;
+    border-radius: 3px;
+    color: #eee;
+    font-family: monospace;
+}
+
 .job-list {
     margin-top: 2rem;
 }
