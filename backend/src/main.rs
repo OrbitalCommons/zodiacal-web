@@ -26,12 +26,17 @@ struct Args {
     dev_mode: bool,
 }
 
+/// In-memory map of jobs awaiting their solve WebSocket connection.
+/// Keyed by job_id, value is (image bytes, optional solver hints).
+pub type PendingUploads =
+    Arc<std::sync::Mutex<HashMap<uuid::Uuid, (Vec<u8>, shared::SolveHints)>>>;
+
 #[derive(Clone)]
 pub struct AppState {
     pub dev_mode: bool,
     pub db_pool: DbPool,
     pub indexes: Arc<Vec<Index>>,
-    pub pending_uploads: Arc<std::sync::Mutex<HashMap<uuid::Uuid, Vec<u8>>>>,
+    pub pending_uploads: PendingUploads,
 }
 
 #[tokio::main]

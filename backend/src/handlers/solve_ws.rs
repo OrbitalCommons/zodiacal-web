@@ -24,9 +24,9 @@ pub async fn handler(
     ws.on_upgrade(move |socket| async move {
         let mut conn = ws_bridge::server::into_connection::<shared::SolveSocket>(socket);
 
-        // Retrieve pending upload bytes
-        let image_bytes = state.pending_uploads.lock().unwrap().remove(&job_id);
-        let Some(image_bytes) = image_bytes else {
+        // Retrieve pending upload bytes + hints
+        let pending = state.pending_uploads.lock().unwrap().remove(&job_id);
+        let Some((image_bytes, hints)) = pending else {
             let _ = conn
                 .send(shared::SolveServerMsg::Failed {
                     reason: "No pending upload for this job ID".to_string(),
@@ -40,7 +40,7 @@ pub async fn handler(
         // Run the solve pipeline, streaming progress
         let (mut tx, _rx) = conn.split();
 
-        if let Err(e) = run_solve_streaming(&state, job_id, &image_bytes, &mut tx).await {
+        if let Err(e) = run_solve_streaming(&state, job_id, &image_bytes, &hints, &mut tx).await {
             tracing::error!(job_id = %job_id, "Solve error: {e:#}");
             let _ = tx
                 .send(shared::SolveServerMsg::Failed {
@@ -56,6 +56,7 @@ async fn run_solve_streaming(
     state: &AppState,
     job_id: Uuid,
     image_bytes: &[u8],
+    hints: &shared::SolveHints,
     tx: &mut ws_bridge::WsSender<shared::SolveServerMsg>,
 ) -> anyhow::Result<()> {
     // Mark job as solving in DB
@@ -68,6 +69,7 @@ async fn run_solve_streaming(
 
     let image_bytes = image_bytes.to_vec();
     let indexes = state.indexes.clone();
+    let hints = hints.clone();
 
     // Channel to bridge sync callback -> async WS
     let (progress_tx, mut progress_rx) = tokio::sync::mpsc::channel::<usize>(32);
@@ -86,10 +88,7 @@ async fn run_solve_streaming(
         let _ = progress_tx.blocking_send(sources.len());
 
         let index_refs: Vec<&zodiacal::index::Index> = indexes.iter().collect();
-        let solver_config = zodiacal::solver::SolverConfig {
-            timeout: Some(Duration::from_secs(60)),
-            ..Default::default()
-        };
+        let solver_config = build_solver_config(&hints);
 
         let mut last_sent = Instant::now();
         let (solution, stats) = zodiacal::solver::solve_with_callback(
@@ -236,4 +235,102 @@ fn apply_job_update(state: &AppState, job_id: Uuid, update: &UpdateJob) -> anyho
         .set(update)
         .execute(&mut conn)?;
     Ok(())
+}
+
+/// Translate optional client-supplied hints into a [`zodiacal::solver::SolverConfig`].
+///
+/// Hints are independent and only take effect when the full pair/triple is
+/// provided (scale needs both min/max; sky region needs RA, Dec, radius).
+/// The 60s solve timeout is always applied.
+fn build_solver_config(hints: &shared::SolveHints) -> zodiacal::solver::SolverConfig {
+    let scale_range = match (hints.scale_min_arcsec, hints.scale_max_arcsec) {
+        (Some(lo), Some(hi)) if lo > 0.0 && hi >= lo => Some((lo, hi)),
+        _ => None,
+    };
+
+    let within = match (hints.ra_hint_deg, hints.dec_hint_deg, hints.radius_hint_deg) {
+        (Some(ra), Some(dec), Some(radius)) if radius > 0.0 => {
+            let center = starfield::Equatorial::from_degrees(ra, dec);
+            Some(zodiacal::solver::SkyRegion::from_degrees(center, radius))
+        }
+        _ => None,
+    };
+
+    zodiacal::solver::SolverConfig {
+        timeout: Some(Duration::from_secs(60)),
+        scale_range,
+        within,
+        ..Default::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_solver_config_no_hints() {
+        let cfg = build_solver_config(&shared::SolveHints::default());
+        assert_eq!(cfg.scale_range, None);
+        assert!(cfg.within.is_none());
+        assert_eq!(cfg.timeout, Some(Duration::from_secs(60)));
+    }
+
+    #[test]
+    fn build_solver_config_scale_pair() {
+        let hints = shared::SolveHints {
+            scale_min_arcsec: Some(0.1),
+            scale_max_arcsec: Some(0.2),
+            ..Default::default()
+        };
+        let cfg = build_solver_config(&hints);
+        assert_eq!(cfg.scale_range, Some((0.1, 0.2)));
+        assert!(cfg.within.is_none());
+    }
+
+    #[test]
+    fn build_solver_config_partial_scale_ignored() {
+        // Only one of min/max → ignored
+        let hints = shared::SolveHints {
+            scale_min_arcsec: Some(0.1),
+            ..Default::default()
+        };
+        assert_eq!(build_solver_config(&hints).scale_range, None);
+    }
+
+    #[test]
+    fn build_solver_config_invalid_scale_ignored() {
+        let hints = shared::SolveHints {
+            scale_min_arcsec: Some(0.5),
+            scale_max_arcsec: Some(0.1), // backwards
+            ..Default::default()
+        };
+        assert_eq!(build_solver_config(&hints).scale_range, None);
+    }
+
+    #[test]
+    fn build_solver_config_sky_region() {
+        let hints = shared::SolveHints {
+            ra_hint_deg: Some(213.5),
+            dec_hint_deg: Some(-55.8),
+            radius_hint_deg: Some(1.0),
+            ..Default::default()
+        };
+        let cfg = build_solver_config(&hints);
+        assert!(cfg.within.is_some());
+        let region = cfg.within.unwrap();
+        // 1 deg in radians
+        assert!((region.radius_rad - 1.0_f64.to_radians()).abs() < 1e-12);
+    }
+
+    #[test]
+    fn build_solver_config_partial_sky_ignored() {
+        // Missing radius → no region
+        let hints = shared::SolveHints {
+            ra_hint_deg: Some(213.5),
+            dec_hint_deg: Some(-55.8),
+            ..Default::default()
+        };
+        assert!(build_solver_config(&hints).within.is_none());
+    }
 }
