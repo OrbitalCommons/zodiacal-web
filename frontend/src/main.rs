@@ -52,7 +52,7 @@ async fn upload_with_progress(
     let upload = xhr.upload().map_err(|e| format!("{e:?}"))?;
     let progress_cb = Closure::wrap(Box::new(move |e: ProgressEvent| {
         if e.length_computable() {
-            let pct = e.loaded() as f64 / e.total() as f64;
+            let pct = e.loaded() / e.total();
             on_progress(pct);
         }
     }) as Box<dyn FnMut(ProgressEvent)>);

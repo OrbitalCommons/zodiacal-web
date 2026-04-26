@@ -1,6 +1,6 @@
 //! Decode uploaded image bytes (FITS, JPEG, PNG, TIFF) into an ndarray for plate solving.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use fitsio_pure::hdu::parse_fits;
 use fitsio_pure::image::{image_dimensions, read_image_data, ImageData};
 use ndarray::Array2;
@@ -33,7 +33,7 @@ fn decode_fits(bytes: &[u8]) -> Result<Array2<f32>> {
     // Find the first HDU with at least 2 dimensions
     let hdu = fits
         .iter()
-        .find(|h| image_dimensions(h).map_or(false, |d| d.len() >= 2))
+        .find(|h| image_dimensions(h).is_ok_and(|d| d.len() >= 2))
         .context("No 2D image HDU found in FITS file")?;
 
     let dims = image_dimensions(hdu).context("Failed to read FITS dimensions")?;
