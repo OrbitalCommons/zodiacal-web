@@ -61,6 +61,9 @@ impl From<Job> for shared::Job {
                 job.field_height_deg,
             ) {
                 (Some(ra), Some(dec), Some(orient), Some(scale), Some(w), Some(h)) => {
+                    // n_matched / log_odds are streamed live via the solve
+                    // WebSocket but not (yet) persisted to the jobs table, so
+                    // they're absent on records loaded from the DB.
                     Some(shared::SolveResult {
                         ra_deg: ra,
                         dec_deg: dec,
@@ -68,6 +71,8 @@ impl From<Job> for shared::Job {
                         pixel_scale_arcsec: scale,
                         field_width_deg: w,
                         field_height_deg: h,
+                        n_matched: None,
+                        log_odds: None,
                     })
                 }
                 _ => None,

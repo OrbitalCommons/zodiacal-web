@@ -148,6 +148,14 @@ pub struct SolveResult {
     pub field_width_deg: f64,
     /// Field height (degrees)
     pub field_height_deg: f64,
+    /// Number of detected sources matched to reference stars in verification.
+    /// `None` for legacy DB records that predate this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub n_matched: Option<usize>,
+    /// Bayesian verification log-odds of the accepted solution.
+    /// `None` for legacy DB records that predate this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub log_odds: Option<f64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -249,6 +257,8 @@ mod tests {
             pixel_scale_arcsec: 1.2,
             field_width_deg: 2.0,
             field_height_deg: 1.5,
+            n_matched: None,
+            log_odds: None,
         };
         let msg = ServerMsg::JobCompleted {
             job_id: id,
@@ -318,6 +328,8 @@ mod tests {
             pixel_scale_arcsec: 1.5,
             field_width_deg: 2.0,
             field_height_deg: 1.5,
+            n_matched: None,
+            log_odds: None,
         };
         let msg = SolveServerMsg::Solved { result };
         let json = serde_json::to_string(&msg).unwrap();
@@ -395,6 +407,38 @@ mod tests {
     }
 
     #[test]
+    fn solve_result_roundtrip_with_diagnostics() {
+        let result = SolveResult {
+            ra_deg: 10.0,
+            dec_deg: 20.0,
+            orientation_deg: 5.0,
+            pixel_scale_arcsec: 0.13,
+            field_width_deg: 0.34,
+            field_height_deg: 0.23,
+            n_matched: Some(47),
+            log_odds: Some(123.4),
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        let parsed: SolveResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.n_matched, Some(47));
+        assert_eq!(parsed.log_odds, Some(123.4));
+    }
+
+    #[test]
+    fn solve_result_legacy_json_decodes() {
+        // SolveResult JSON written before n_matched/log_odds existed must still
+        // deserialize. The default `serde(default)` lets the Option fields fall
+        // back to None.
+        let legacy = r#"{
+            "ra_deg": 10.0, "dec_deg": 20.0, "orientation_deg": 5.0,
+            "pixel_scale_arcsec": 0.13, "field_width_deg": 0.34, "field_height_deg": 0.23
+        }"#;
+        let parsed: SolveResult = serde_json::from_str(legacy).unwrap();
+        assert_eq!(parsed.n_matched, None);
+        assert_eq!(parsed.log_odds, None);
+    }
+
+    #[test]
     fn solve_result_roundtrip() {
         let result = SolveResult {
             ra_deg: 123.456,
@@ -403,6 +447,8 @@ mod tests {
             pixel_scale_arcsec: 0.5,
             field_width_deg: 1.0,
             field_height_deg: 0.75,
+            n_matched: None,
+            log_odds: None,
         };
         let json = serde_json::to_string(&result).unwrap();
         let parsed: SolveResult = serde_json::from_str(&json).unwrap();
