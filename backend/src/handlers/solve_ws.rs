@@ -10,7 +10,7 @@ use uuid::Uuid;
 use crate::decode::decode_image;
 use crate::models::UpdateJob;
 use crate::schema::jobs;
-use crate::AppState;
+use crate::{AppState, PendingPayload};
 
 /// GET /ws/solve/:job_id — WebSocket endpoint that streams solve progress.
 ///
@@ -24,9 +24,9 @@ pub async fn handler(
     ws.on_upgrade(move |socket| async move {
         let mut conn = ws_bridge::server::into_connection::<shared::SolveSocket>(socket);
 
-        // Retrieve pending upload bytes + hints
+        // Retrieve pending upload payload + hints
         let pending = state.pending_uploads.lock().unwrap().remove(&job_id);
-        let Some((image_bytes, hints)) = pending else {
+        let Some((payload, hints)) = pending else {
             let _ = conn
                 .send(shared::SolveServerMsg::Failed {
                     reason: "No pending upload for this job ID".to_string(),
@@ -40,7 +40,7 @@ pub async fn handler(
         // Run the solve pipeline, streaming progress
         let (mut tx, _rx) = conn.split();
 
-        if let Err(e) = run_solve_streaming(&state, job_id, &image_bytes, &hints, &mut tx).await {
+        if let Err(e) = run_solve_streaming(&state, job_id, payload, &hints, &mut tx).await {
             tracing::error!(job_id = %job_id, "Solve error: {e:#}");
             let _ = tx
                 .send(shared::SolveServerMsg::Failed {
@@ -52,10 +52,13 @@ pub async fn handler(
 }
 
 /// Run the full solve pipeline, sending progress over the WS sender.
+///
+/// `payload` chooses between the slow-path (decode + extract from raw image
+/// bytes) and the fast-path (pre-extracted source list).
 async fn run_solve_streaming(
     state: &AppState,
     job_id: Uuid,
-    image_bytes: &[u8],
+    payload: PendingPayload,
     hints: &shared::SolveHints,
     tx: &mut ws_bridge::WsSender<shared::SolveServerMsg>,
 ) -> anyhow::Result<()> {
@@ -67,22 +70,31 @@ async fn run_solve_streaming(
         .send(shared::SolveServerMsg::Extracting { n_sources: None })
         .await;
 
-    let image_bytes = image_bytes.to_vec();
     let indexes = state.indexes.clone();
     let hints = hints.clone();
 
     // Channel to bridge sync callback -> async WS
     let (progress_tx, mut progress_rx) = tokio::sync::mpsc::channel::<usize>(32);
 
-    // Spawn the blocking solve
+    // Spawn the blocking solve. Either:
+    //  - Image: decode -> extract -> solve, OR
+    //  - Sources: solve directly (skips ~5s extraction floor).
     let solve_handle = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
-        let array = decode_image(&image_bytes)?;
-        let (h, w) = array.dim();
-
-        let sources = zodiacal::extraction::extract_sources(
-            &array,
-            &zodiacal::extraction::ExtractionConfig::default(),
-        );
+        let (sources, w, h) = match payload {
+            PendingPayload::Image(bytes) => {
+                let array = decode_image(&bytes)?;
+                let (h, w) = array.dim();
+                let sources = zodiacal::extraction::extract_sources(
+                    &array,
+                    &zodiacal::extraction::ExtractionConfig::default(),
+                );
+                (sources, w, h)
+            }
+            PendingPayload::Sources {
+                sources,
+                image_size,
+            } => (sources, image_size.0 as usize, image_size.1 as usize),
+        };
 
         // Report source count (send will fail if receiver dropped — that's fine)
         let _ = progress_tx.blocking_send(sources.len());
