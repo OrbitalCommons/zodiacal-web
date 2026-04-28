@@ -26,9 +26,27 @@ struct Args {
     dev_mode: bool,
 }
 
+/// What an upload carries before its solve WS connects.
+///
+/// `Image` is the original path: raw bytes that need decoding + source
+/// extraction before solving (~5s overhead on a 9568×6380 frame).
+///
+/// `Sources` is the fast path: a pre-extracted source list (typically
+/// produced by `zodiacal extract` or any client-side extractor) along
+/// with the image size needed for WCS fitting. Solving these skips
+/// decode + extraction entirely.
+pub enum PendingPayload {
+    Image(Vec<u8>),
+    Sources {
+        sources: Vec<zodiacal::extraction::DetectedSource>,
+        image_size: (f64, f64),
+    },
+}
+
 /// In-memory map of jobs awaiting their solve WebSocket connection.
-/// Keyed by job_id, value is (image bytes, optional solver hints).
-pub type PendingUploads = Arc<std::sync::Mutex<HashMap<uuid::Uuid, (Vec<u8>, shared::SolveHints)>>>;
+/// Keyed by job_id, value is (payload, optional solver hints).
+pub type PendingUploads =
+    Arc<std::sync::Mutex<HashMap<uuid::Uuid, (PendingPayload, shared::SolveHints)>>>;
 
 #[derive(Clone)]
 pub struct AppState {
